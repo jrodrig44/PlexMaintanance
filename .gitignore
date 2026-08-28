@@ -1,0 +1,26 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local application/runtime database
+scan_history.db
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Local environment files
+.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# OS/editor generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
