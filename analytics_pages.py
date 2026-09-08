@@ -81,7 +81,7 @@ def filters(page, zone, users):
         custom_end = right.date_input('Custom end', today)
         st.caption('Custom dates apply only when Date range is Custom.')
         selected_user, media, search = None, None, ''
-        if page in ('History', 'Devices', 'Transcoding'):
+        if page in ('History', 'Devices', 'Transcoding', 'Bandwidth'):
             selected_user = st.selectbox('User', [None, *names], format_func=lambda k: 'All users' if k is None else names[k])
             media = st.selectbox('Media type', [None, 'movie', 'episode', 'track', 'live'], format_func=lambda k: k or 'All media')
             search = st.text_input('Search title')
@@ -133,14 +133,22 @@ def users_page(rows, users, zone):
 
 def render_analytics(page, raw_url, api_key):
     st.title(page)
+    if page == 'Bandwidth':
+        from bandwidth_pages import current_bandwidth, historical_bandwidth
+        refresh = st.button('Refresh', type='primary')
+        threshold = st.number_input('High-bandwidth threshold (Mbps)', min_value=0.0, max_value=1000000.0, value=20.0, step=5.0)
+        st.caption('High bandwidth means strictly above the threshold. Changing it reuses cached data.')
+        current_bandwidth(raw_url, api_key, refresh, threshold)
+        st.subheader('Historical bandwidth · loaded history')
     zone = os.environ.get('PLEX_DASHBOARD_TIMEZONE', 'America/New_York')
     try:
         ZoneInfo(zone)
     except (ZoneInfoNotFoundError, ValueError):
         st.error('Invalid PLEX_DASHBOARD_TIMEZONE. Set an IANA timezone such as America/New_York or UTC.')
         return
-    st.caption(f'Dates and day boundaries: {zone}. All metrics and charts describe loaded history only.')
-    refresh = st.button('Refresh', type='primary')
+    st.caption(f'Dates and day boundaries: {zone}. ' + ('The following filters apply to history only; current sessions are unfiltered.' if page == 'Bandwidth' else 'All metrics and charts describe loaded history only.'))
+    if page != 'Bandwidth':
+        refresh = st.button('Refresh', type='primary')
     state = st.session_state.setdefault('analytics_cache', {})
     try:
         url, entries = connection_cache(state, raw_url, api_key)
@@ -185,6 +193,8 @@ def render_analytics(page, raw_url, api_key):
         history_table(rows, zone)
     elif page == 'Users':
         users_page(rows, users, zone)
+    elif page == 'Bandwidth':
+        historical_bandwidth(rows, zone, threshold)
     else:
         from device_pages import devices_page, transcoding_page
         if page == 'Devices':

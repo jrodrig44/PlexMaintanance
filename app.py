@@ -1099,13 +1099,13 @@ def main():
     st.set_page_config(page_title="Plex Control Center", page_icon=":film_projector:", layout="wide")
     apply_custom_style()
     with st.sidebar:
-        page = st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Maintenance"])
+        page = st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Bandwidth", "Maintenance"])
         st.header("Tautulli Connection")
         raw_url = st.text_input("Tautulli URL or Host", value=DEFAULT_BASE_URL)
         api_key = st.text_input("API Key", value=DEFAULT_API_KEY, type="password")
     if page == "Maintenance":
         render_maintenance(raw_url, api_key)
-    elif page in ('History', 'Users', 'Devices', 'Transcoding'):
+    elif page in ('History', 'Users', 'Devices', 'Transcoding', 'Bandwidth'):
         render_analytics(page, raw_url, api_key)
     else:
         render_live_dashboard(page, raw_url, api_key)

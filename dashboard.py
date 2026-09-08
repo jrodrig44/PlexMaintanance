@@ -3,6 +3,7 @@ import hashlib
 import time
 from datetime import datetime, timezone
 import streamlit as st
+from playback import format_bandwidth
 from tautulli_client import TautulliError, get_activity, get_server_info, get_artwork, normalize_base_url
 
 
@@ -36,7 +37,7 @@ def display(value):
 
 
 def bandwidth(value):
-    return 'Unavailable' if value is None else f'{value / 1000:,.2f} Mbps'
+    return format_bandwidth(value, adaptive=False)
 
 
 def duration(value):

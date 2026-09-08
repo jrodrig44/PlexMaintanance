@@ -14,9 +14,10 @@ PlexMaintanance can run on a different machine from both services. Tautulli rema
 - **Users:** user directory, rankings over the selected range, and individual playback/content/platform drilldowns.
 - **Devices:** identified client and player/platform groups, known-subset playback rates, rankings and device/group drilldowns.
 - **Transcoding:** decision coverage, transcode rankings, conditional component/4K analysis and recent transcodes.
+- **Bandwidth:** current bandwidth estimates and stream ranking, plus conditional historical bandwidth calculations with explicit coverage and stock-history limitations.
 - **Maintenance:** existing library and recursive disk scanning, watched/unwatched determination, Not in Plex results, Keep overrides, deletion queue, preview/confirmation, status editing, filtering, and SQLite persistence.
 
-Overview, Now Playing, History, Users, Devices, and Transcoding need LAN access to Tautulli's API but **do not need access to Plex media storage or the maintenance database**. An unavailable media share does not block live pages. A Tautulli outage shows a degraded state; saved Maintenance results can still be opened.
+Overview, Now Playing, History, Users, Devices, Transcoding, and Bandwidth need LAN access to Tautulli's API but **do not need access to Plex media storage or the maintenance database**. An unavailable media share does not block live pages. A Tautulli outage shows a degraded state; saved Maintenance results can still be opened.
 
 ## Configuration and security
 
@@ -192,3 +193,39 @@ Devices and Transcoding reuse the existing three-minute historical cache, includ
 The manual harness now includes **Detailed synthetic** in addition to Active/Empty/Offline. Active represents ordinary history without detailed stream fields; Detailed synthetic deliberately adds documented optional stream fields to exercise conditional classification/4K rendering. It does not claim that stock `get_history` supplies those fields. Both scenarios include Direct Play, Direct Stream, Transcode and unknown examples.
 
 The Phase 3 tests cover identity/grouping/privacy, deterministic rankings, known-subset rates, component classifications, conservative 4K detection, optional-field handling, cache reuse/schema upgrade, limited datasets, page failures/empty states, refresh and media/database isolation. All Phase 1/2 tests remain part of the full suite.
+
+## Phase 4: Bandwidth
+
+Navigation is now Overview, Now Playing, History, Users, Devices, Transcoding, **Bandwidth**, Maintenance. The Bandwidth page combines an unfiltered **current** snapshot with a separately filtered historical section. Plex and Tautulli remain remote; PlexMaintanance uses Tautulli as its authority. There is no background collector, persistent bandwidth/history database, measured network-interface traffic, or new monitoring/deployment service. Maintenance SQLite remains Maintenance-only.
+
+### Sources and units
+
+The existing `/api/v2` transport uses `get_activity` for `total_bandwidth`, `lan_bandwidth`, `wan_bandwidth`, and each session's `bandwidth`. These are decimal **kilobits per second (kbps)**. Current bandwidth is Plex Streaming Brain's estimate of reserved/required streaming bandwidth, **not measured throughput** and not necessarily the media's bitrate. See the [Tautulli API reference](https://docs.tautulli.com/extending-tautulli/api-reference), [bandwidth explanation](https://docs.tautulli.com/support/frequently-asked-questions#history-q12), and [notification parameter definitions](https://github.com/Tautulli/Tautulli/blob/master/plexpy/common.py) (`stream_bandwidth`).
+
+`playback.normalize_bandwidth` accepts finite nonnegative numbers/numeric strings, rejects booleans, negatives, NaN/infinity, containers, missing values and unit-bearing strings, and returns a numeric `bandwidth_kbps` or `None`. Live sessions retain the existing `bandwidth` alias for compatibility. Activity aggregates keep their existing normalized metric names. `bandwidth_mbps` and `format_bandwidth` centralize display conversion: 1,000 Kbps = 1 Mbps; 1,000 Mbps = 1 Gbps. Normal values use Mbps, small nonzero values Kbps, very large values Gbps. Existing live pages retain their Mbps formatting. No bytes/sec, media bitrate, quality label or watched duration is silently substituted.
+
+### Current snapshot
+
+Current cards show total/local/remote bandwidth, active/remote/transcode stream counts, and the highest known session. Tautulli aggregates take precedence even when session detail is incomplete. If an aggregate is absent, a session sum is used only when every relevant bandwidth is known; local/remote fallback also requires every session's location to be known. Empty session lists produce derived zero. Unknown location never becomes Local; incomplete current location/decision counts show Unavailable. The page labels each total's source and session/location coverage.
+
+The session table sorts bandwidth descending, puts unknown values last, and includes public title/user/player/platform, location, playback decision, bandwidth, quality, resolution, speed and a high-bandwidth flag. The chart shows the highest 20 known sessions. The numeric threshold defaults to **20 Mbps**, and a session is high only when its known bandwidth is **strictly greater** than the threshold. Unknown is not classified as low. Changing the threshold is a local calculation, with no alerting or notifications.
+
+### Historical limitations and conditional detail
+
+**Stock `get_history` does not return reliable per-playback bandwidth.** The [history implementation](https://github.com/Tautulli/Tautulli/blob/master/plexpy/datafactory.py) and documented `get_home_stats` outputs were reviewed: history/home statistics provide playback counts, durations, rankings and concurrency, not a usable bounded bandwidth aggregate. No additional endpoint or per-row enrichment call was added. With ordinary history, Bandwidth explicitly shows historical bandwidth unavailable and omits unsupported rankings/trends. Current values are never persisted or turned into historical samples. Existing History/Devices/Transcoding remain available for supported playback metrics; watch time is not a substitute for bandwidth.
+
+For payloads that explicitly supply the established Tautulli `bandwidth` field in kbps, conditional calculations use **known playback values only**. This is compatibility handling, exercised with synthetic payloads, not a claim that stock history exposes the field. Mean and median are per-playback and unweighted; peak is the maximum known playback value, not a simultaneous network peak. No GB-transfer estimate or bitrate-times-duration calculation is included.
+
+The section exposes bandwidth coverage and missing/invalid counts; joint bandwidth/location coverage; local/remote counts and means; highest remote playback; and Remote % whose denominator contains only playbacks with both bandwidth and location. Rankings switch between users, devices/groups and titles, sorted by mean, peak or high-bandwidth count. Device rows reuse Phase 3 identity scopes and include remote/transcode means, their sample counts and location/decision coverage. Unknown identities are excluded and coverage is shown; raw machine IDs and IP fields are discarded. Daily bars show average and remote average Mbps and high-bandwidth counts in the configured timezone, with a coverage table. Days without supplied values remain unavailable; dates outside loaded rows are not filled in as zero.
+
+### Filters, caches and failure handling
+
+Bandwidth reuses the same HistoryQuery, Last 7/30/90 days, This year, All available and Custom presets (default Last 30 days), timezone boundaries, user/media/title filters, row cap, deduplication and loaded-history warnings. These filters apply only to history. Identical queries across historical pages reuse the same three-minute cache; normalized history schema version 4 prevents obsolete cached rows surviving a hot reload. Current data shares `live_dashboard` and the 30-second activity cache with Overview/Now Playing. There is no second cache or N+1 request pattern.
+
+A cold Bandwidth page uses one `get_activity`, one bounded `get_history`, plus the existing cached `get_server_info` and `get_users` reads. The shared directory TTL is three minutes and server-info TTL five minutes. Manual Refresh bypasses the relevant live/history and supporting entries once each. Fresh reruns, threshold/ranking changes and compatible page changes make no extra requests. Current and historical errors are independent: a failed source does not hide the other section, and stale results from a failed refresh are not displayed. No media-filesystem or Maintenance-database access is needed.
+
+### Validation
+
+`tests/test_bandwidth.py` adds mocked normalization, units, complete/partial aggregate fallbacks, sorting, threshold, historical known-subset calculations, identities, daily timezone behavior, filtering, cache TTL/refresh/connection isolation, API efficiency, privacy, outages/auth/malformed payloads and Streamlit page tests. All earlier phase tests remain in the full suite; their navigation fixtures include Bandwidth. Run `python -m unittest discover -s tests`.
+
+The local mock harness (`streamlit run tests/manual_dashboard.py`) adds **Bandwidth synthetic**: 8 Mbps Local Direct Play and 25 Mbps Remote Transcode current sessions, plus deliberately supplied historical bandwidth with partial coverage. Active retains stock-style history with no bandwidth. Empty and Offline exercise the respective states. These scenarios never require real Plex/Tautulli services or production Maintenance data.

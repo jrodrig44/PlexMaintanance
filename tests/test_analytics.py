@@ -261,7 +261,7 @@ class AnalyticsUITests(unittest.TestCase):
         source = Path('app.py').read_text()
         source = source.replace('def init_db() -> None:', 'def init_db() -> None:\n    raise AssertionError("Analytics must not open SQLite")')
         source = source.replace('def get_disk_video_paths(folder: str) -> List[str]:', 'def get_disk_video_paths(folder: str) -> List[str]:\n    raise AssertionError("Media path unavailable")')
-        nav = '["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Maintenance"]'
+        nav = '["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Bandwidth", "Maintenance"]'
         return source.replace('st.radio("Navigation", ' + nav + ')', 'st.radio("Navigation", ' + nav + ', index=' + str(2 if page == 'History' else 3) + ')')
 
     @patch.dict(os.environ, {'TAUTULLI_API_KEY': 'mock-key', 'PLEX_DASHBOARD_TIMEZONE': 'America/New_York'})

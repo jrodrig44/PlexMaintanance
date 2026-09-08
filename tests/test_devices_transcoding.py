@@ -211,7 +211,7 @@ class PageTests(unittest.TestCase):
         source = Path('app.py').read_text()
         source = source.replace('def init_db() -> None:', 'def init_db() -> None:\n    raise AssertionError("Must not open SQLite")')
         source = source.replace('def get_disk_video_paths(folder: str) -> List[str]:', 'def get_disk_video_paths(folder: str) -> List[str]:\n    raise AssertionError("Must not access media")')
-        nav = '["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Maintenance"]'
+        nav = '["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Bandwidth", "Maintenance"]'
         return source.replace('st.radio("Navigation", ' + nav + ')', 'st.radio("Navigation", ' + nav + ', index=' + str(4 if page == 'Devices' else 5) + ')')
 
     @patch.dict(os.environ, {'TAUTULLI_API_KEY': 'mock-only'})

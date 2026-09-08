@@ -2,7 +2,7 @@
 import math
 from urllib.parse import urlsplit
 import requests
-from playback import normalize_decision
+from playback import normalize_decision, normalize_bandwidth
 
 
 class TautulliError(RuntimeError):
@@ -104,7 +104,8 @@ def normalize_session(raw):
         'progress': min(progress, 100) if progress is not None else None,
         'elapsed': elapsed,
         'duration': duration,
-        'bandwidth': number(raw.get('bandwidth')),
+        'bandwidth': normalize_bandwidth(raw.get('bandwidth')),
+        'bandwidth_kbps': normalize_bandwidth(raw.get('bandwidth')),
         'speed': number(raw.get('transcode_speed')),
     }
 
@@ -122,7 +123,7 @@ def normalize_activity(data):
     for label in ('Direct Play', 'Direct Stream', 'Transcode'):
         metrics[label] = decisions.count(label) if all(decisions) else None
     for label, key in [('Total bandwidth','total_bandwidth'), ('Local bandwidth','lan_bandwidth'), ('Remote bandwidth','wan_bandwidth')]:
-        metrics[label] = number(data.get(key))
+        metrics[label] = normalize_bandwidth(data.get(key))
     return {'sessions': sessions, 'metrics': metrics}
 
 

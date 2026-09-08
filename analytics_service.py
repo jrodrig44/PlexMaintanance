@@ -6,7 +6,7 @@ from analytics import normalize_history, normalize_user
 from tautulli_client import tautulli_get, normalize_base_url, TautulliError
 
 CACHE_SECONDS = 180
-HISTORY_SCHEMA_VERSION = 3  # Do not reuse older normalized rows after a hot reload.
+HISTORY_SCHEMA_VERSION = 4  # Do not reuse older normalized rows after a hot reload.
 
 
 def connection_cache(state, base_url, api_key):

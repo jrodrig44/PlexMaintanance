@@ -2,7 +2,39 @@
 import hashlib
 import ipaddress
 import json
+import math
 import re
+
+
+def normalize_bandwidth(value):
+    """Tautulli bandwidth fields are decimal kilobits/second, not media bitrate.
+
+    Current values are Plex Streaming Brain reserved/required estimates, not
+    measured network throughput. Stock get_history omits the bandwidth field.
+    """
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        value = float(value)
+        return value if math.isfinite(value) and value >= 0 else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def bandwidth_mbps(value):
+    value = normalize_bandwidth(value)
+    return None if value is None else value / 1000
+
+
+def format_bandwidth(value, adaptive=True):
+    mbps = bandwidth_mbps(value)
+    if mbps is None:
+        return 'Unavailable'
+    if adaptive and mbps >= 1000:
+        return f'{mbps / 1000:,.2f} Gbps'
+    if adaptive and 0 < mbps < 1:
+        return f'{mbps * 1000:,.2f} Kbps'
+    return f'{mbps:,.2f} Mbps'
 
 
 def public_text(value):
@@ -74,6 +106,7 @@ def normalize_playback_fields(raw):
     def decision(primary, fallback):
         return normalize_decision(raw.get(primary) if primary in raw else raw.get(fallback))
     return {
+        'bandwidth_kbps': normalize_bandwidth(raw.get('bandwidth')),
         **device_identity(raw), 'product': public_text(raw.get('product')),
         'source_resolution': normalize_resolution(raw.get('video_resolution')),
         'stream_resolution': normalize_resolution(raw.get('stream_video_resolution')),
