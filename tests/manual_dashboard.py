@@ -12,7 +12,7 @@ import app
 
 app.DEFAULT_API_KEY = 'mock-only'
 app.DB_PATH = str(Path(tempfile.gettempdir()) / 'plex-phase1-visual-qa.db')
-mode = st.sidebar.selectbox('Mock scenario', ['Active', 'Empty', 'Offline'])
+mode = st.sidebar.selectbox('Mock scenario', ['Active', 'Empty', 'Offline', 'Detailed synthetic'])
 if st.session_state.get('mock_scenario') != mode:
     st.session_state.pop('live_dashboard', None)
     st.session_state.pop('analytics_cache', None)
@@ -42,6 +42,18 @@ def mock_get(*args, **kwargs):
                  media_type='movie', rating_key=102, platform='Chrome', player='Browser', location='wan',
                  transcode_decision='transcode', percent_complete=33),
         ]
+        if history:
+            history[0].update(machine_id='mock-client-one', product='Plex')
+            history[1].update(machine_id='mock-client-two', product='Plex Web')
+            history.extend([dict(history[0], row_id=3, transcode_decision='copy'),
+                            dict(history[1], row_id=4, transcode_decision=None)])
+        if mode == 'Detailed synthetic':
+            # Conditional-detail QA only: standard get_history omits these fields.
+            for item in history:
+                item.update(video_resolution='2160', stream_video_resolution='1080',
+                            video_codec='hevc', audio_codec='aac', container='mkv',
+                            video_decision='transcode' if item['transcode_decision'] == 'transcode' else 'copy',
+                            audio_decision='copy')
         data = {'data': history, 'recordsFiltered': len(history), 'recordsTotal': len(history)}
     return Mock(status_code=200, json=Mock(return_value={'response': {'result': 'success', 'data': data}}))
 

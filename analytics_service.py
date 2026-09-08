@@ -6,6 +6,7 @@ from analytics import normalize_history, normalize_user
 from tautulli_client import tautulli_get, normalize_base_url, TautulliError
 
 CACHE_SECONDS = 180
+HISTORY_SCHEMA_VERSION = 3  # Do not reuse older normalized rows after a hot reload.
 
 
 def connection_cache(state, base_url, api_key):
@@ -41,7 +42,7 @@ def read_history(state, base_url, api_key, query, refresh=False):
         raise TautulliError('History row limit must be between 1 and 2000.')
     def load(url):
         return normalize_history(tautulli_get(url, api_key, 'get_history', **query.api_params()), query.limit)
-    return cached_read(state, base_url, api_key, ('history', query), load, refresh)
+    return cached_read(state, base_url, api_key, ('history', query, HISTORY_SCHEMA_VERSION), load, refresh)
 
 
 def read_users(state, base_url, api_key, refresh=False):

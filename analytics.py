@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
+from playback import normalize_decision, normalize_playback_fields
 from tautulli_client import TautulliError, number as _number
 
 PRESETS = ('Last 7 days', 'Last 30 days', 'Last 90 days', 'This year', 'All available', 'Custom')
@@ -57,6 +58,7 @@ def normalize_history_row(raw):
     # Both fields are seconds of recorded playback, with pauses already subtracted.
     watch = number(raw.get('play_duration') if 'play_duration' in raw else raw.get('duration'))
     return {
+        **normalize_playback_fields(raw),
         'row_id': field('row_id'), 'started': timestamp(raw.get('started')) or timestamp(raw.get('date')),
         'stopped': timestamp(raw.get('stopped')), 'user_key': identity(user_id, username),
         'user_id': user_id, 'username': username,
@@ -68,8 +70,7 @@ def normalize_history_row(raw):
         'media_type': media_type, 'player': field('player'), 'platform': field('platform'),
         'location': {'lan': 'Local', 'wan': 'Remote'}.get(field('location')),
         'watch_seconds': watch, 'completion': complete,
-        'decision': {'direct play': 'Direct Play', 'copy': 'Direct Stream', 'direct stream': 'Direct Stream',
-                     'transcode': 'Transcode'}.get((field('transcode_decision') or '').lower()),
+        'decision': normalize_decision(field('transcode_decision')),
     }
 
 

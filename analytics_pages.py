@@ -81,7 +81,7 @@ def filters(page, zone, users):
         custom_end = right.date_input('Custom end', today)
         st.caption('Custom dates apply only when Date range is Custom.')
         selected_user, media, search = None, None, ''
-        if page == 'History':
+        if page in ('History', 'Devices', 'Transcoding'):
             selected_user = st.selectbox('User', [None, *names], format_func=lambda k: 'All users' if k is None else names[k])
             media = st.selectbox('Media type', [None, 'movie', 'episode', 'track', 'live'], format_func=lambda k: k or 'All media')
             search = st.text_input('Search title')
@@ -183,5 +183,11 @@ def render_analytics(page, raw_url, api_key):
         trend(rows, zone)
         st.subheader('Recent playback')
         history_table(rows, zone)
-    else:
+    elif page == 'Users':
         users_page(rows, users, zone)
+    else:
+        from device_pages import devices_page, transcoding_page
+        if page == 'Devices':
+            devices_page(rows, zone)
+        else:
+            transcoding_page(rows, zone)

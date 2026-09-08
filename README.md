@@ -12,9 +12,11 @@ PlexMaintanance can run on a different machine from both services. Tautulli rema
 - **Now Playing:** stream cards with titles, episode information, user, player, platform/product, local/remote status, quality, stream decisions, progress, elapsed/duration, bandwidth, and available transcode speed. IP addresses are omitted. Optional artwork is fetched through Tautulli; the API key is never placed in browser image URLs.
 - **History:** date, user, media-type and title filters, playback/watch-time summaries, daily charts, and a recent playback table.
 - **Users:** user directory, rankings over the selected range, and individual playback/content/platform drilldowns.
+- **Devices:** identified client and player/platform groups, known-subset playback rates, rankings and device/group drilldowns.
+- **Transcoding:** decision coverage, transcode rankings, conditional component/4K analysis and recent transcodes.
 - **Maintenance:** existing library and recursive disk scanning, watched/unwatched determination, Not in Plex results, Keep overrides, deletion queue, preview/confirmation, status editing, filtering, and SQLite persistence.
 
-Overview, Now Playing, History, and Users need LAN access to Tautulli's API but **do not need access to Plex media storage or the maintenance database**. An unavailable media share does not block live pages. A Tautulli outage shows a degraded state; saved Maintenance results can still be opened.
+Overview, Now Playing, History, Users, Devices, and Transcoding need LAN access to Tautulli's API but **do not need access to Plex media storage or the maintenance database**. An unavailable media share does not block live pages. A Tautulli outage shows a degraded state; saved Maintenance results can still be opened.
 
 ## Configuration and security
 
@@ -73,7 +75,7 @@ Missing optional fields show `Unavailable`. Decision counts require known decisi
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m compileall -q app.py dashboard.py tautulli_client.py analytics.py analytics_service.py analytics_pages.py tests
+python -m compileall -q app.py dashboard.py tautulli_client.py analytics.py analytics_service.py analytics_pages.py playback.py device_analytics.py device_pages.py tests
 ```
 
 Tests mock HTTP calls and use temporary maintenance databases/files. They cover normalization, counts, missing fields, safe failures, credentials, refresh caching, Streamlit page navigation, unavailable media isolation, persistence/Keep upserts, played/unwatched scanning, disk-only protection, preview, and deletion. No running Plex or Tautulli service is required.
@@ -126,3 +128,67 @@ python -m streamlit run tests/manual_dashboard.py --server.port 8517
 ```
 
 Use its Active, Empty, and Offline scenarios and navigate to History/Users. This harness mocks Tautulli HTTP calls and uses a temporary maintenance database. Automated tests additionally exercise duration semantics, DST/date filters, aggregation, malformed payloads, cache identity/expiry/refresh, failure isolation, and both new Streamlit pages without media/database access, alongside the Phase 1 regressions.
+
+## Devices and Transcoding
+
+The Phase 3 pages use the same remote architecture and in-memory, bounded history as History/Users. No new API endpoints, history database, media filesystem access, collectors, or polling were introduced. The shared client still calls `get_history` and optionally the cached `get_users` directory; all device/transcode rankings and drilldowns are local calculations. `get_activity` remains limited to the existing live pages.
+
+Both new pages offer the Phase 2 date presets (Last 30 days by default), optional user/media/title filters and the 500/1,000/2,000 candidate-row cap. Exact timezone filtering, missing-date warnings and limited-history warnings are unchanged. All statistics refer to loaded history, not lifetime or unseen records.
+
+### Device identity and privacy
+
+Identity follows a deterministic hierarchy:
+
+1. A nonempty `machine_id` identifies a Tautulli **client**, with a SHA-256 digest used only internally. The raw identifier is discarded, never displayed or written to SQLite. A literal IP address is rejected as an identifier.
+2. Without a machine ID, player name + product + platform form a **Player label group**. Different players on the same platform remain separate. Identical labels can represent multiple clients; these groups are not counted as uniquely identified devices.
+3. Without a player, available platform/product form a **Platform/product group**.
+4. Without any identity fields, records go into **Unknown device**, which does not increase the identified-device count.
+
+The identified-device metric counts distinct client identifiers, not proven physical hardware. An identifier stays together after a player rename; different identifiers remain separate even when their names and platform match. Group numbers in tables/controls distinguish identical display labels without revealing identifiers. Sorting uses descending plays, then name, scope and internal key. IP addresses, tokens and unrelated network fields are discarded; default tables never show them. Digests and histories remain session-memory data, not a new local database.
+
+Devices shows coverage, playback/location rates, device/group and platform charts, a ranking table, and a separate expandable playback breakdown. Drilldowns include known watch time, unique users/titles, playback/location counts, daily trends, selectable top users/content/shows/movies and recent activity. A chart selector switches top devices between plays and known watch minutes. Rankings and drilldowns always state the actual identity level.
+
+### Decisions, percentages and categories
+
+`playback.py` centralizes the existing live/history convention: `direct play` → Direct Play, `copy`/`direct stream` → Direct Stream, and `transcode` → Transcode. Unknown or missing values stay unknown. The Phase 1 live cache and rendering are unchanged.
+
+Phase 3 reports both known and unknown decision counts. Rates use **only known decisions**: 60 Direct Play, 10 Direct Stream, 20 Transcode and 10 unknown means 66.7% Direct Play and 22.2% Transcode among 90 known—not percentages of all 100. Location rates independently use known Local/Remote records; unknown locations are not Local. Unique known platforms and identified clients have explicit missing/identity coverage. Phase 2's existing all-or-unavailable summary semantics remain unchanged.
+
+Component classification requires overall Transcode plus explicit video and audio decisions:
+
+- Both Transcode: Video + audio transcode.
+- Video Transcode and audio Direct Play/Direct Stream: Video-only transcode.
+- Audio Transcode and video Direct Play/Direct Stream: Audio-only transcode.
+- Missing, contradictory or insufficient components: Unknown.
+
+Direct Play and Direct Stream retain their overall categories unless an explicit component contradicts them. No codec incompatibility, subtitle-burning cause, or other transcode reason is inferred. Video, audio-only and remote transcode counts describe their known/classifiable subsets, with coverage captions; unavailable detail does not become zero.
+
+### Fields and current Tautulli limitations
+
+Verified standard `get_history` fields used for this phase are `machine_id`, `player`, `platform`, `product`, `transcode_decision` and `location`, alongside existing history fields. The [current Tautulli history implementation](https://github.com/Tautulli/Tautulli/blob/master/plexpy/datafactory.py) **does not return source/stream resolution, codecs, container, or video/audio/subtitle decisions**. Consequently, standard history supports device and overall decision analytics, but detailed historical classification and 4K analytics normally show **Unavailable**.
+
+The shared normalizer conditionally understands these established Tautulli stream-field names **only if explicitly present** in a supplied payload:
+
+| Raw Tautulli fields | Normalized fields |
+| --- | --- |
+| `machine_id`, `player`, `platform`, `product` | `device_key` (digest), `device_scope`, `device_name`, `product` |
+| `video_resolution`, `stream_video_resolution` | `source_resolution`, `stream_resolution` |
+| `stream_video_decision` / `video_decision` | `video_decision` |
+| `stream_audio_decision` / `audio_decision` | `audio_decision` |
+| `stream_subtitle_decision` / `subtitle_decision` | `subtitle_decision` |
+| `video_codec`, `audio_codec`, `container` | same-named source fields |
+| `stream_video_codec`, `stream_audio_codec`, `stream_container` | same-named stream fields |
+
+These detail names are documented for [Tautulli activity and stream details](https://docs.tautulli.com/extending-tautulli/api-reference). They are not assumed to exist in stock history, and no per-row `get_stream_data` calls are made. Optional technical columns appear only when the loaded payload actually contains usable values. Unknown subtitle decisions remain unknown; no reason field is invented. Older versions may also omit product, machine ID or location, reducing identity/coverage accordingly.
+
+Resolution normalization accepts explicit `4k`, `uhd`, `4k uhd`, `uhd 4k`, `2160`, and `2160p` as 4K. Known lower resolutions and 8K remain distinct; unrecognized/missing values are unknown. Only **source** resolution determines 4K playback/transcodes/Direct Play. Bitrate, codecs, and output/stream resolution are never used to guess the source. Counts state source/decision coverage, and the recent-4K list includes only explicit 4K-source transcodes.
+
+Transcoding provides two compact decision/category charts, a selectable ranking table for devices/groups, users, titles, shows, platforms, source resolutions and source video codecs, local/remote counts, a recent-transcode table, and an expandable recent-4K table. Empty or unsupported rankings show an unavailable state.
+
+### Cache reuse and validation
+
+Devices and Transcoding reuse the existing three-minute historical cache, including across pages with identical query values. Cache identity retains URL, credential digest, dates, timezone, user/media/title filters and row cap; a normalized-schema version prevents reuse of older rows after an app reload. No competing cache was added. Manual Refresh bypasses the current history/directory entries as before, failures do not render stale data, and drilldowns make no API calls. The 30-second live cache is unchanged.
+
+The manual harness now includes **Detailed synthetic** in addition to Active/Empty/Offline. Active represents ordinary history without detailed stream fields; Detailed synthetic deliberately adds documented optional stream fields to exercise conditional classification/4K rendering. It does not claim that stock `get_history` supplies those fields. Both scenarios include Direct Play, Direct Stream, Transcode and unknown examples.
+
+The Phase 3 tests cover identity/grouping/privacy, deterministic rankings, known-subset rates, component classifications, conservative 4K detection, optional-field handling, cache reuse/schema upgrade, limited datasets, page failures/empty states, refresh and media/database isolation. All Phase 1/2 tests remain part of the full suite.

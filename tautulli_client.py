@@ -2,6 +2,7 @@
 import math
 from urllib.parse import urlsplit
 import requests
+from playback import normalize_decision
 
 
 class TautulliError(RuntimeError):
@@ -78,7 +79,7 @@ def normalize_session(raw):
     if progress is None and elapsed is not None and duration:
         progress = elapsed / duration * 100
     decision = field('transcode_decision')
-    decision = {'direct play': 'Direct Play', 'copy': 'Direct Stream', 'direct stream': 'Direct Stream', 'transcode': 'Transcode'}.get((decision or '').lower())
+    decision = normalize_decision(decision)
     return {
         'artwork': field('grandparent_thumb', 'thumb'),
         'title': field('full_title', 'title'),
