@@ -3,6 +3,32 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
+function Import-TautulliSecret {
+    param([Parameter(Mandatory = $true)][string]$ProjectDirectory)
+
+    # Inherited process environment includes Windows user/system values.
+    if (-not [string]::IsNullOrWhiteSpace($env:TAUTULLI_API_KEY)) { return }
+    $secretPath = Join-Path $ProjectDirectory '.env.local'
+    if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf)) { return }
+    try {
+        $lines = [System.IO.File]::ReadAllLines($secretPath)
+    }
+    catch {
+        throw 'Could not read local Tautulli secret file. Check file permissions.'
+    }
+    foreach ($line in $lines) {
+        if ($line -match '^\s*TAUTULLI_API_KEY\s*=(.*)$') {
+            $value = $Matches[1].Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                $env:TAUTULLI_API_KEY = $value
+                return
+            }
+        }
+    }
+}
+
+Import-TautulliSecret -ProjectDirectory $ScriptDir
+
 function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory = $true)]

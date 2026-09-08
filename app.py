@@ -1102,7 +1102,16 @@ def main():
         page = st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Devices", "Transcoding", "Bandwidth", "Maintenance"])
         st.header("Tautulli Connection")
         raw_url = st.text_input("Tautulli URL or Host", value=DEFAULT_BASE_URL)
-        api_key = st.text_input("API Key", value=DEFAULT_API_KEY, type="password")
+        api_key = DEFAULT_API_KEY.strip()
+        if api_key:
+            st.caption("API Key: Configured on server")
+            if st.checkbox("Use a temporary session API key"):
+                override = st.text_input("Temporary API Key", type="password").strip()
+                st.caption("Temporary and device/session-specific. Leave blank to use the server key.")
+                api_key = override or api_key
+        else:
+            api_key = st.text_input("API Key", type="password").strip()
+            st.caption("This key is temporary and device/session-specific. Configure a server key for shared access.")
     if page == "Maintenance":
         render_maintenance(raw_url, api_key)
     elif page in ('History', 'Users', 'Devices', 'Transcoding', 'Bandwidth'):

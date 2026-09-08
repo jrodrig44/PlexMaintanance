@@ -28,7 +28,7 @@ $env:TAUTULLI_URL = 'http://PlexServer:8181'
 $env:TAUTULLI_API_KEY = '<your-rotated-api-key>'
 ```
 
-The URL defaults to `http://PlexServer:8181`. Hostnames, explicit ports, HTTPS, and reverse-proxy base paths are supported. The sidebar allows runtime URL and password-masked API-key overrides. Enable API access in Tautulli and use its API key. `.env` files are ignored but are not automatically loaded; set the process environment or use the sidebar.
+The URL defaults to `http://PlexServer:8181`. Hostnames, explicit ports, HTTPS, and reverse-proxy base paths are supported. The sidebar allows runtime URL changes and explicit temporary password-masked API-key overrides; the server key is never placed in a widget. Enable API access in Tautulli and use its API key. The PowerShell launcher loads `.env.local` as described below; direct Streamlit launches require an environment variable or temporary session input.
 
 **Rotate/regenerate the previously committed Tautulli API key in Tautulli.** The exposed key has been removed from the current Python and legacy PowerShell source, but remains in historical Git commits. Removing it from the current tree does not revoke it. No replacement secret is committed. API credentials are held in process/browser-session memory, never written to SQLite or application logs. Remote error bodies and request URLs are excluded from API errors.
 
@@ -229,3 +229,17 @@ A cold Bandwidth page uses one `get_activity`, one bounded `get_history`, plus t
 `tests/test_bandwidth.py` adds mocked normalization, units, complete/partial aggregate fallbacks, sorting, threshold, historical known-subset calculations, identities, daily timezone behavior, filtering, cache TTL/refresh/connection isolation, API efficiency, privacy, outages/auth/malformed payloads and Streamlit page tests. All earlier phase tests remain in the full suite; their navigation fixtures include Bandwidth. Run `python -m unittest discover -s tests`.
 
 The local mock harness (`streamlit run tests/manual_dashboard.py`) adds **Bandwidth synthetic**: 8 Mbps Local Direct Play and 25 Mbps Remote Transcode current sessions, plus deliberately supplied historical bandwidth with partial coverage. Active retains stock-style history with no bandwidth. Empty and Offline exercise the respective states. These scenarios never require real Plex/Tautulli services or production Maintenance data.
+
+### Shared server API key with the Windows launcher
+
+1. Copy `.env.local.example` to `.env.local` beside `Run-Dashboard.ps1`.
+2. Replace the placeholder with your Tautulli API key: `TAUTULLI_API_KEY=your-key` (no quotes).
+3. Run `Start-PlexMaintanance-Dashboard.bat` as usual. The PowerShell launcher loads the key into its process environment before starting Streamlit.
+4. Every browser/device connecting to this app uses the server credential. The sidebar shows **API Key: Configured on server**, without rendering the key.
+5. Never commit `.env.local`; Git ignores it. Only the placeholder example is tracked.
+
+Launcher precedence: a populated inherited Windows/process `TAUTULLI_API_KEY` wins over `.env.local`. Windows user/system values must be inherited by a newly started launcher. No registry changes are made. Without either source, the app allows temporary session input. The loader reads only the exact `TAUTULLI_API_KEY` entry, trims surrounding whitespace, skips empty values, comments and unrelated lines, and uses the first nonempty matching entry. Values are literal data: no interpolation, script execution, quote removal or inline comments. It does not print the key or pass it in command-line arguments.
+
+App precedence: an explicitly enabled, nonblank temporary session override wins over the server key; a blank override falls back to the server key. Without a server key, password input remains temporary and device/session-specific. Restart the launcher to pick up secret-file changes. The batch file, dependency setup, port 8503 preference/existing busy-port fallback, and shutdown behavior are unchanged.
+
+Validate the loader without real secrets using `powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_launcher_secret.ps1`. Python credential tests use synthetic credentials and independent Streamlit sessions. For real-device validation, configure `.env.local`, launch the batch file, and open the displayed address from two browsers/devices; Overview should connect without entering a key.
