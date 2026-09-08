@@ -24,3 +24,11 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local caches and SQLite files
+.uv-cache/
+.uv-python*/
+.pytest_cache/
+*.db
+*.db-*
+*.sqlite*

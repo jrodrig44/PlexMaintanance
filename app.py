@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import requests
+from tautulli_client import normalize_base_url, tautulli_get
+from dashboard import render_live_dashboard
 import streamlit as st
 
 
-DEFAULT_BASE_URL = "http://PlexServer:8181"
-DEFAULT_API_KEY = "73e0f7d7d3854ee69e6604817fdfee75"
+DEFAULT_BASE_URL = os.environ.get("TAUTULLI_URL", "http://PlexServer:8181")
+DEFAULT_API_KEY = os.environ.get("TAUTULLI_API_KEY", "")
 DEFAULT_LIBRARY_ID = "1"
 DEFAULT_MEDIA_FOLDER = r"Z:\Plex Movies"
 VIDEO_EXTENSIONS = {".avi", ".mkv", ".mp4", ".mpg", ".rmvb"}
@@ -555,38 +556,6 @@ def add_override_column(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def normalize_base_url(raw: str) -> str:
-    value = (raw or "").strip()
-    if not value:
-        raise ValueError("Tautulli URL cannot be empty.")
-
-    if not value.startswith(("http://", "https://")):
-        if ":" in value and value.rsplit(":", 1)[1].isdigit():
-            value = f"http://{value}"
-        else:
-            value = f"http://{value}:8181"
-
-    return value.rstrip("/")
-
-
-def tautulli_get(base_url: str, api_key: str, command: str, **params: Any) -> Dict[str, Any]:
-    query = {
-        "apikey": api_key,
-        "cmd": command,
-    }
-    query.update(params)
-
-    response = requests.get(f"{base_url}/api/v2", params=query, timeout=20)
-    response.raise_for_status()
-    payload = response.json()
-
-    if payload.get("response", {}).get("result") != "success":
-        message = payload.get("response", {}).get("message", "Unknown API error")
-        raise RuntimeError(f"Tautulli API error for '{command}': {message}")
-
-    return payload.get("response", {}).get("data", {})
-
-
 def test_connection(base_url: str, api_key: str) -> Dict[str, Any]:
     return tautulli_get(base_url, api_key, "get_server_info")
 
@@ -919,218 +888,225 @@ def init_state() -> None:
             st.session_state[key] = value
 
 
-st.set_page_config(page_title="Plex Media Dashboard", page_icon=":film_projector:", layout="wide")
-init_db()
-apply_custom_style()
-init_state()
-
-should_reload_from_db = st.session_state.results_df.empty
-
-if should_reload_from_db:
+def render_maintenance(raw_url, api_key):
+    init_state()
     try:
-        ok, message = load_latest_scan_into_session()
-        st.session_state.db_bootstrap_error = None if ok else message
-    except Exception as ex:
-        # Keep app usable even if saved history is unavailable/corrupt.
-        st.session_state.db_bootstrap_error = str(ex)
+        init_db()
+    except sqlite3.Error:
+        st.error("Maintenance database unavailable. Check local permissions and database integrity.")
+        return
+    should_reload_from_db = st.session_state.results_df.empty
 
-st.markdown(
-    """
-    <div class='hero'>
-        <h2>Plex / Tautulli Media Dashboard</h2>
-        <p>Scan your library, compare total vs played counts, and optionally preview/delete unwatched files.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    if should_reload_from_db:
+        try:
+            ok, message = load_latest_scan_into_session()
+            st.session_state.db_bootstrap_error = None if ok else message
+        except Exception as ex:
+            # Keep app usable even if saved history is unavailable/corrupt.
+            st.session_state.db_bootstrap_error = str(ex)
 
-if st.session_state.db_bootstrap_error:
-    st.warning(f"Could not load latest saved scan from database: {st.session_state.db_bootstrap_error}")
+    st.title("Maintenance")
+    if st.session_state.db_bootstrap_error:
+        st.warning("Could not load saved maintenance state. Check the local SQLite database.")
+    with st.sidebar:
+        library_id = st.text_input("Library Section ID", value=DEFAULT_LIBRARY_ID)
+        media_folder = st.text_input("Media folder", value=DEFAULT_MEDIA_FOLDER, help="Recursively scans AVI, MKV, MP4, MPG, and RMVB files. Files not in Plex are shown but cannot be deleted.")
 
-with st.sidebar:
-    st.header("Connection")
-    raw_url = st.text_input("Tautulli URL or Host", value=DEFAULT_BASE_URL, help="Examples: PlexServer, 192.168.1.234, http://PlexServer:8181")
-    api_key = st.text_input("API Key", value=DEFAULT_API_KEY, type="password")
-    library_id = st.text_input("Library Section ID", value=DEFAULT_LIBRARY_ID)
-    media_folder = st.text_input("Media folder", value=DEFAULT_MEDIA_FOLDER, help="Recursively scans AVI, MKV, MP4, MPG, and RMVB files. Files not in Plex are shown but cannot be deleted.")
+        st.header("Scan Options")
+        delete_unwatched = st.toggle("Delete unwatched files", value=False)
+        preview_delete = st.toggle("Preview deletions before removing", value=True, disabled=not delete_unwatched)
+        reload_latest_clicked = st.button("Reload latest from database", width="stretch")
 
-    st.header("Scan Options")
-    delete_unwatched = st.toggle("Delete unwatched files", value=False)
-    preview_delete = st.toggle("Preview deletions before removing", value=True, disabled=not delete_unwatched)
-    reload_latest_clicked = st.button("Reload latest from database", width="stretch")
+        test_clicked = st.button("Test Connection", width="stretch")
+        scan_clicked = st.button("Scan Library", width="stretch", type="primary")
 
-    test_clicked = st.button("Test Connection", width="stretch")
-    scan_clicked = st.button("Scan Library", width="stretch", type="primary")
+    if reload_latest_clicked:
+        try:
+            ok, message = load_latest_scan_into_session()
+            if ok:
+                st.success(message)
+            else:
+                st.info(message)
+        except Exception as ex:
+            st.error(f"Failed to reload from database: {ex}")
 
-if reload_latest_clicked:
-    try:
-        ok, message = load_latest_scan_into_session()
-        if ok:
-            st.success(message)
-        else:
-            st.info(message)
-    except Exception as ex:
-        st.error(f"Failed to reload from database: {ex}")
+    if test_clicked:
+        try:
+            base_url = normalize_base_url(raw_url)
+            info = test_connection(base_url, api_key)
+            tautulli_version = (
+                info.get("tautulli_version")
+                or info.get("version")
+                or info.get("tautulli_branch")
+                or "Unavailable"
+            )
+            st.success(f"Connected to Tautulli at {base_url}")
+            st.caption(f"Server: {tautulli_version}")
+        except Exception as ex:
+            st.error(f"Connection failed: {ex}")
 
-if test_clicked:
-    try:
-        base_url = normalize_base_url(raw_url)
-        info = test_connection(base_url, api_key)
-        tautulli_version = (
-            info.get("tautulli_version")
-            or info.get("version")
-            or info.get("tautulli_branch")
-            or "Unavailable"
-        )
-        st.success(f"Connected to Tautulli at {base_url}")
-        st.caption(f"Server: {tautulli_version}")
-    except Exception as ex:
-        st.error(f"Connection failed: {ex}")
+    if scan_clicked:
+        try:
+            base_url = normalize_base_url(raw_url)
+            test_connection(base_url, api_key)
+            with prevent_system_sleep():
+                df, metrics, queue = scan_library(
+                    base_url=base_url,
+                    api_key=api_key,
+                    section_id=library_id,
+                    media_folder=media_folder,
+                    delete_unwatched=delete_unwatched,
+                    preview_delete=preview_delete,
+                )
 
-if scan_clicked:
-    try:
-        base_url = normalize_base_url(raw_url)
-        test_connection(base_url, api_key)
-        with prevent_system_sleep():
-            df, metrics, queue = scan_library(
+            st.session_state.results_df = df
+            st.session_state.metrics = metrics
+            st.session_state.delete_queue = queue
+            st.session_state.current_scan_id = save_scan_result(
                 base_url=base_url,
-                api_key=api_key,
-                section_id=library_id,
-                media_folder=media_folder,
+                library_id=library_id,
                 delete_unwatched=delete_unwatched,
                 preview_delete=preview_delete,
+                metrics=metrics,
+                results_df=df,
             )
+            st.session_state.last_scan_ok = True
+        except Exception as ex:
+            st.session_state.last_scan_ok = False
+            st.error(f"Scan failed: {ex}")
 
-        st.session_state.results_df = df
-        st.session_state.metrics = metrics
-        st.session_state.delete_queue = queue
-        st.session_state.current_scan_id = save_scan_result(
-            base_url=base_url,
-            library_id=library_id,
-            delete_unwatched=delete_unwatched,
-            preview_delete=preview_delete,
-            metrics=metrics,
-            results_df=df,
-        )
-        st.session_state.last_scan_ok = True
-    except Exception as ex:
-        st.session_state.last_scan_ok = False
-        st.error(f"Scan failed: {ex}")
+    metrics: ScanMetrics = st.session_state.metrics
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1.metric("Total media", metrics.total_media)
+    col2.metric("Scanned media", metrics.scanned_media)
+    col3.metric("Played media", metrics.played_media)
+    col4.metric("Unwatched media", metrics.unwatched_media)
+    col5.metric("Queued for delete", metrics.queued_for_delete)
+    col6.metric("Deleted", metrics.deleted_media)
+    col7.metric("Not in Plex", metrics.disk_only_media)
 
-metrics: ScanMetrics = st.session_state.metrics
-col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-col1.metric("Total media", metrics.total_media)
-col2.metric("Scanned media", metrics.scanned_media)
-col3.metric("Played media", metrics.played_media)
-col4.metric("Unwatched media", metrics.unwatched_media)
-col5.metric("Queued for delete", metrics.queued_for_delete)
-col6.metric("Deleted", metrics.deleted_media)
-col7.metric("Not in Plex", metrics.disk_only_media)
-
-st.markdown(
-    "<p class='hint'>Total media and played media are expected to be different unless every item has been watched.</p>",
-    unsafe_allow_html=True,
-)
-
-if st.session_state.delete_queue and delete_unwatched and preview_delete:
-    st.warning(f"{len(st.session_state.delete_queue)} file(s) are queued for deletion from the last scan.")
-    if st.button("Confirm Delete Queued Files", type="secondary"):
-        updated_df, deleted, failed, actions = delete_queued_files(
-            st.session_state.results_df.copy(),
-            st.session_state.delete_queue,
-        )
-        st.session_state.results_df = updated_df
-        st.session_state.delete_queue = []
-        st.session_state.metrics = calculate_metrics_from_df(st.session_state.results_df)
-        update_scan_result(1, st.session_state.metrics, st.session_state.results_df)
-        log_delete_actions(1, actions)
-        st.success(f"Delete complete. Deleted {deleted} file(s). Failed or missing: {failed}.")
-
-st.subheader("Results")
-
-results_df: pd.DataFrame = st.session_state.results_df.copy()
-if results_df.empty:
-    st.info("Run a scan to view results.")
-else:
-    status_options = sorted(
-        set(results_df["Status"].dropna().astype(str).tolist())
-        | {"Played", "Unwatched", "Queued for delete", "Deleted", "Keep", "Not found", "Delete failed"}
+    st.markdown(
+        "<p class='hint'>Total media and played media are expected to be different unless every item has been watched.</p>",
+        unsafe_allow_html=True,
     )
 
-    st.caption("You can manually edit Status. Set a row to 'Keep' (or anything except 'Queued for delete') to prevent deletion.")
-    display_df = add_override_column(results_df)
-    editable_df = st.data_editor(
-        display_df,
-        width="stretch",
-        hide_index=True,
-        disabled=["RatingKey", "Title", "FilePath", "TotalPlays", "ServerStatus", "Override"],
-        column_config={
-            "RatingKey": None,
-            "ServerStatus": st.column_config.TextColumn("ServerStatus", help="Derived from Plex/Tautulli scan data."),
-            "Override": st.column_config.CheckboxColumn("Override", help="True means local Status differs from ServerStatus."),
-            "Status": st.column_config.SelectboxColumn(
-                "Status",
-                options=status_options,
-                required=True,
+    if st.session_state.delete_queue and delete_unwatched and preview_delete:
+        st.warning(f"{len(st.session_state.delete_queue)} file(s) are queued for deletion from the last scan.")
+        if st.button("Confirm Delete Queued Files", type="secondary"):
+            updated_df, deleted, failed, actions = delete_queued_files(
+                st.session_state.results_df.copy(),
+                st.session_state.delete_queue,
             )
-        },
-        key="status_editor",
-    )
+            st.session_state.results_df = updated_df
+            st.session_state.delete_queue = []
+            st.session_state.metrics = calculate_metrics_from_df(st.session_state.results_df)
+            update_scan_result(1, st.session_state.metrics, st.session_state.results_df)
+            log_delete_actions(1, actions)
+            st.success(f"Delete complete. Deleted {deleted} file(s). Failed or missing: {failed}.")
 
-    if st.button("Apply Status Changes", type="secondary"):
-        updated_df = editable_df.drop(columns=["Override"], errors="ignore").copy().reset_index(drop=True)
-        st.session_state.results_df = updated_df
-        st.session_state.delete_queue = build_delete_queue_from_df(updated_df)
-        st.session_state.metrics = calculate_metrics_from_df(st.session_state.results_df)
+    st.subheader("Results")
 
-        update_scan_result(1, st.session_state.metrics, st.session_state.results_df)
+    results_df: pd.DataFrame = st.session_state.results_df.copy()
+    if results_df.empty:
+        st.info("Run a scan to view results.")
+    else:
+        status_options = sorted(
+            set(results_df["Status"].dropna().astype(str).tolist())
+            | {"Played", "Unwatched", "Queued for delete", "Deleted", "Keep", "Not found", "Delete failed"}
+        )
 
-        st.success("Status updates applied.")
+        st.caption("You can manually edit Status. Set a row to 'Keep' (or anything except 'Queued for delete') to prevent deletion.")
+        display_df = add_override_column(results_df)
+        editable_df = st.data_editor(
+            display_df,
+            width="stretch",
+            hide_index=True,
+            disabled=["RatingKey", "Title", "FilePath", "TotalPlays", "ServerStatus", "Override"],
+            column_config={
+                "RatingKey": None,
+                "ServerStatus": st.column_config.TextColumn("ServerStatus", help="Derived from Plex/Tautulli scan data."),
+                "Override": st.column_config.CheckboxColumn("Override", help="True means local Status differs from ServerStatus."),
+                "Status": st.column_config.SelectboxColumn(
+                    "Status",
+                    options=status_options,
+                    required=True,
+                )
+            },
+            key="status_editor",
+        )
 
-    results_df = st.session_state.results_df.copy()
+        if st.button("Apply Status Changes", type="secondary"):
+            updated_df = editable_df.drop(columns=["Override"], errors="ignore").copy().reset_index(drop=True)
+            st.session_state.results_df = updated_df
+            st.session_state.delete_queue = build_delete_queue_from_df(updated_df)
+            st.session_state.metrics = calculate_metrics_from_df(st.session_state.results_df)
 
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 2])
-    search = filter_col1.text_input("Search title/path/status", value="")
-    all_statuses = sorted(results_df["Status"].dropna().unique().tolist())
-    chosen_statuses = filter_col2.multiselect("Filter status", options=all_statuses, default=all_statuses)
-    sort_by = filter_col3.selectbox("Sort by", options=["Title A-Z", "Title Z-A", "Plays High-Low", "Plays Low-High", "Status"])
+            update_scan_result(1, st.session_state.metrics, st.session_state.results_df)
 
-    if search.strip():
-        pattern = search.strip().lower()
-        results_df = results_df[
-            results_df["Title"].fillna("").str.lower().str.contains(pattern)
-            | results_df["FilePath"].fillna("").str.lower().str.contains(pattern)
-            | results_df["Status"].fillna("").str.lower().str.contains(pattern)
-        ]
+            st.success("Status updates applied.")
 
-    if chosen_statuses:
-        results_df = results_df[results_df["Status"].isin(chosen_statuses)]
+        results_df = st.session_state.results_df.copy()
 
-    if sort_by == "Title A-Z":
-        results_df = results_df.sort_values(by=["Title"], ascending=True)
-    elif sort_by == "Title Z-A":
-        results_df = results_df.sort_values(by=["Title"], ascending=False)
-    elif sort_by == "Plays High-Low":
-        results_df = results_df.sort_values(by=["TotalPlays", "Title"], ascending=[False, True])
-    elif sort_by == "Plays Low-High":
-        results_df = results_df.sort_values(by=["TotalPlays", "Title"], ascending=[True, True])
-    elif sort_by == "Status":
-        results_df = results_df.sort_values(by=["Status", "Title"], ascending=[True, True])
+        filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 2])
+        search = filter_col1.text_input("Search title/path/status", value="")
+        all_statuses = sorted(results_df["Status"].dropna().unique().tolist())
+        chosen_statuses = filter_col2.multiselect("Filter status", options=all_statuses, default=all_statuses)
+        sort_by = filter_col3.selectbox("Sort by", options=["Title A-Z", "Title Z-A", "Plays High-Low", "Plays Low-High", "Status"])
 
-    st.dataframe(
-        add_override_column(results_df),
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "RatingKey": None,
-            "Override": st.column_config.CheckboxColumn("Override"),
-        },
-    )
+        if search.strip():
+            pattern = search.strip().lower()
+            results_df = results_df[
+                results_df["Title"].fillna("").str.lower().str.contains(pattern)
+                | results_df["FilePath"].fillna("").str.lower().str.contains(pattern)
+                | results_df["Status"].fillna("").str.lower().str.contains(pattern)
+            ]
 
-    chart_data = pd.DataFrame(
-        {
-            "Category": ["Played", "Unwatched"],
-            "Count": [metrics.played_media, metrics.unwatched_media],
-        }
-    )
-    st.bar_chart(chart_data.set_index("Category"))
+        if chosen_statuses:
+            results_df = results_df[results_df["Status"].isin(chosen_statuses)]
+
+        if sort_by == "Title A-Z":
+            results_df = results_df.sort_values(by=["Title"], ascending=True)
+        elif sort_by == "Title Z-A":
+            results_df = results_df.sort_values(by=["Title"], ascending=False)
+        elif sort_by == "Plays High-Low":
+            results_df = results_df.sort_values(by=["TotalPlays", "Title"], ascending=[False, True])
+        elif sort_by == "Plays Low-High":
+            results_df = results_df.sort_values(by=["TotalPlays", "Title"], ascending=[True, True])
+        elif sort_by == "Status":
+            results_df = results_df.sort_values(by=["Status", "Title"], ascending=[True, True])
+
+        st.dataframe(
+            add_override_column(results_df),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "RatingKey": None,
+                "Override": st.column_config.CheckboxColumn("Override"),
+            },
+        )
+
+        chart_data = pd.DataFrame(
+            {
+                "Category": ["Played", "Unwatched"],
+                "Count": [metrics.played_media, metrics.unwatched_media],
+            }
+        )
+        st.bar_chart(chart_data.set_index("Category"))
+
+
+def main():
+    st.set_page_config(page_title="Plex Control Center", page_icon=":film_projector:", layout="wide")
+    apply_custom_style()
+    with st.sidebar:
+        page = st.radio("Navigation", ["Overview", "Now Playing", "Maintenance"])
+        st.header("Tautulli Connection")
+        raw_url = st.text_input("Tautulli URL or Host", value=DEFAULT_BASE_URL)
+        api_key = st.text_input("API Key", value=DEFAULT_API_KEY, type="password")
+    if page == "Maintenance":
+        render_maintenance(raw_url, api_key)
+    else:
+        render_live_dashboard(page, raw_url, api_key)
+
+
+if __name__ == "__main__":
+    main()

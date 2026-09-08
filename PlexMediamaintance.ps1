@@ -7,7 +7,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $TautulliURL = "http://PlexServer:8181"
-$APIKey      = "73e0f7d7d3854ee69e6604817fdfee75"
+$APIKey      = $env:TAUTULLI_API_KEY
 $LibraryID   = "1"  # Change to your library section ID
 
 function Normalize-TautulliBaseUrl {
@@ -43,7 +43,7 @@ function Test-TautulliConnection {
         return $true
     }
     catch {
-        throw [System.Exception]::new("Cannot connect to Tautulli at '$BaseUrl'. Verify the URL, port, and that Tautulli is running. Original error: $($_.Exception.Message)")
+        throw [System.Exception]::new("Cannot connect to Tautulli at '$BaseUrl'. Verify the URL, port, and that Tautulli is running.")
     }
 }
 
@@ -183,7 +183,7 @@ function Get-MediaDashboardScan {
             }
         }
         catch {
-            [void]$results.Rows.Add(($item.title), [string]::Empty, 0, "Error: $($_.Exception.Message)")
+            [void]$results.Rows.Add(($item.title), [string]::Empty, 0, "Error: Tautulli request failed. Check connectivity and API credentials.")
         }
 
         if ($OnProgress) {
@@ -549,7 +549,7 @@ $scanButton.Add_Click({
         }
     }
     catch {
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Scan failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("Scan failed. Check Tautulli connectivity, API credentials, and media access.", "Scan failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         $statusLabel.Text = "Scan failed"
     }
     finally {
