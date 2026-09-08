@@ -171,7 +171,7 @@ class UITests(unittest.TestCase):
             at = AppTest.from_string(source)
             at.session_state['live_dashboard'] = {}
             # Start directly in Maintenance via the navigation widget's key.
-            source = source.replace('st.radio("Navigation", ["Overview", "Now Playing", "Maintenance"])', 'st.radio("Navigation", ["Overview", "Now Playing", "Maintenance"], index=2)')
+            source = source.replace('st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Maintenance"])', 'st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Maintenance"], index=4)')
             at = AppTest.from_string(source).run()
             self.assertFalse(at.exception)
             self.assertTrue(any(t.value == 'Maintenance' for t in at.title))

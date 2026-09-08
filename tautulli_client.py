@@ -56,7 +56,8 @@ def tautulli_get(base_url, api_key, command, **params):
     if envelope.get('result') != 'success':
         raise TautulliError('Tautulli API rejected the request. Check the API key and command permissions.')
     data = envelope.get('data')
-    if not isinstance(data, dict):
+    expected_type = list if command == 'get_users' else dict
+    if not isinstance(data, expected_type):
         raise TautulliError('Tautulli returned malformed command data.')
     return data
 

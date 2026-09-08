@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,6 +13,10 @@ import app
 app.DEFAULT_API_KEY = 'mock-only'
 app.DB_PATH = str(Path(tempfile.gettempdir()) / 'plex-phase1-visual-qa.db')
 mode = st.sidebar.selectbox('Mock scenario', ['Active', 'Empty', 'Offline'])
+if st.session_state.get('mock_scenario') != mode:
+    st.session_state.pop('live_dashboard', None)
+    st.session_state.pop('analytics_cache', None)
+    st.session_state['mock_scenario'] = mode
 
 def mock_get(*args, **kwargs):
     if mode == 'Offline':
@@ -21,6 +26,23 @@ def mock_get(*args, **kwargs):
     if command == 'get_activity':
         sessions = [] if mode == 'Empty' else [dict(full_title='Example Show - Episode One', title='Episode One', grandparent_title='Example Show', media_type='episode', parent_media_index='1', media_index='1', user_id='1', friendly_name='Sample viewer', player='Living room TV', platform='Roku', product='Plex', local='1', quality_profile='Original', transcode_decision='direct play', stream_video_decision='direct play', stream_audio_decision='direct play', view_offset='900000', duration='2700000', bandwidth='8000')]
         data = {'sessions': sessions, 'total_bandwidth': 8000 if sessions else 0, 'lan_bandwidth': 8000 if sessions else 0, 'wan_bandwidth': 0}
+    if command == 'get_users':
+        data = [{'user_id': 1, 'username': 'sample', 'friendly_name': 'Sample viewer', 'is_active': 1},
+                {'user_id': 2, 'username': 'guest', 'friendly_name': 'Sample guest', 'is_active': 0}]
+    if command == 'get_history':
+        now = int(datetime.now(timezone.utc).timestamp())
+        history = [] if mode == 'Empty' else [
+            dict(row_id=1, user_id=1, user='sample', friendly_name='Sample viewer', started=now - 3600,
+                 stopped=now - 1800, play_duration=1800, full_title='Example Show - Episode One', title='Episode One',
+                 media_type='episode', grandparent_title='Example Show', grandparent_rating_key=100, rating_key=101,
+                 parent_media_index=1, media_index=1, platform='Roku', player='Living room TV', location='lan',
+                 transcode_decision='direct play', percent_complete=67),
+            dict(row_id=2, user_id=2, user='guest', friendly_name='Sample guest', started=now - 86400,
+                 stopped=now - 84600, play_duration=1800, full_title='Example Movie', title='Example Movie',
+                 media_type='movie', rating_key=102, platform='Chrome', player='Browser', location='wan',
+                 transcode_decision='transcode', percent_complete=33),
+        ]
+        data = {'data': history, 'recordsFiltered': len(history), 'recordsTotal': len(history)}
     return Mock(status_code=200, json=Mock(return_value={'response': {'result': 'success', 'data': data}}))
 
 with patch('tautulli_client.requests.get', side_effect=mock_get):

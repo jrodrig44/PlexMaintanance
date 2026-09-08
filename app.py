@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from tautulli_client import normalize_base_url, tautulli_get
 from dashboard import render_live_dashboard
+from analytics_pages import render_analytics
 import streamlit as st
 
 
@@ -1098,12 +1099,14 @@ def main():
     st.set_page_config(page_title="Plex Control Center", page_icon=":film_projector:", layout="wide")
     apply_custom_style()
     with st.sidebar:
-        page = st.radio("Navigation", ["Overview", "Now Playing", "Maintenance"])
+        page = st.radio("Navigation", ["Overview", "Now Playing", "History", "Users", "Maintenance"])
         st.header("Tautulli Connection")
         raw_url = st.text_input("Tautulli URL or Host", value=DEFAULT_BASE_URL)
         api_key = st.text_input("API Key", value=DEFAULT_API_KEY, type="password")
     if page == "Maintenance":
         render_maintenance(raw_url, api_key)
+    elif page in ('History', 'Users'):
+        render_analytics(page, raw_url, api_key)
     else:
         render_live_dashboard(page, raw_url, api_key)
 
