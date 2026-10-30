@@ -34,16 +34,24 @@ The URL defaults to `http://PlexServer:8181`. Hostnames, explicit ports, HTTPS, 
 
 ## Run
 
-Use Python 3.12 or later:
+Use Python 3.12 or later. The Windows launcher is the recommended startup path:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m streamlit run app.py --server.port 8503
+.\Start-PlexMaintanance-Dashboard.bat
 ```
 
-Alternatively, double-click `Start-PlexMaintanance-Dashboard.bat`, which invokes `Run-Dashboard.ps1`, installs dependencies, and selects an available port starting at 8503.
+The launcher checks the port before creating or repairing the runtime, then validates installed packages against `requirements-lock.txt`. It installs or repairs the exact locked versions only when validation fails; healthy launches skip installation. The virtual environment, pip download cache, and dependency fingerprint are kept under `%LOCALAPPDATA%\PlexMaintanance`, outside synced project files. If port 8503 is busy, the launcher preserves its existing behavior and selects the next available port.
+
+For manual startup, use a machine-local environment and the same lock:
+
+```powershell
+$runtime = Join-Path $env:LOCALAPPDATA 'PlexMaintanance\venv'
+py -3.12 -m venv $runtime
+& "$runtime\Scripts\python.exe" -m pip install -r requirements-lock.txt
+& "$runtime\Scripts\python.exe" -m streamlit run app.py --server.port 8503
+```
+
+The direct requirements are pinned to Streamlit 1.66.1, pandas 2.3.3, requests 2.34.2, and tzdata 2026.6; the lock pins their complete resolved dependency set. Keeping pandas below 3 avoids its current incompatibility warnings with Streamlit. The project does not globally suppress Python warnings.
 
 ## Maintenance storage
 
@@ -240,6 +248,6 @@ The local mock harness (`streamlit run tests/manual_dashboard.py`) adds **Bandwi
 
 Launcher precedence: a populated inherited Windows/process `TAUTULLI_API_KEY` wins over `.env.local`. Windows user/system values must be inherited by a newly started launcher. No registry changes are made. Without either source, the app allows temporary session input. The loader reads only the exact `TAUTULLI_API_KEY` entry, trims surrounding whitespace, skips empty values, comments and unrelated lines, and uses the first nonempty matching entry. Values are literal data: no interpolation, script execution, quote removal or inline comments. It does not print the key or pass it in command-line arguments.
 
-App precedence: an explicitly enabled, nonblank temporary session override wins over the server key; a blank override falls back to the server key. Without a server key, password input remains temporary and device/session-specific. Restart the launcher to pick up secret-file changes. The batch file, dependency setup, port 8503 preference/existing busy-port fallback, and shutdown behavior are unchanged.
+App precedence: an explicitly enabled, nonblank temporary session override wins over the server key; a blank override falls back to the server key. Without a server key, password input remains temporary and device/session-specific. Restart the launcher to pick up secret-file changes. The batch entry point, port 8503 preference/existing busy-port fallback, and child-process shutdown behavior are preserved.
 
 Validate the loader without real secrets using `powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_launcher_secret.ps1`. Python credential tests use synthetic credentials and independent Streamlit sessions. For real-device validation, configure `.env.local`, launch the batch file, and open the displayed address from two browsers/devices; Overview should connect without entering a key.
