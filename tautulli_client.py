@@ -1,8 +1,11 @@
 """Shared Tautulli transport and live payload normalization; no persistence."""
+import logging
 import math
 from urllib.parse import urlsplit
 import requests
 from playback import normalize_decision, normalize_bandwidth
+
+logger = logging.getLogger(__name__)
 
 
 class TautulliError(RuntimeError):
@@ -25,6 +28,57 @@ def normalize_base_url(raw):
     return value.rstrip('/')
 
 
+def _underlying_os_error(error):
+    pending = [error]
+    visited = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        if current is not error and isinstance(current, OSError):
+            return current
+        for related in (
+            getattr(current, '__cause__', None),
+            getattr(current, '__context__', None),
+            getattr(current, 'reason', None),
+            *(arg for arg in current.args if isinstance(arg, BaseException)),
+        ):
+            if isinstance(related, BaseException):
+                pending.append(related)
+    return None
+
+
+def _log_request_warning(command, error, status_code=None):
+    if status_code is None:
+        response = getattr(error, 'response', None)
+        candidate = getattr(response, 'status_code', None)
+        status_code = candidate if type(candidate) is int else None
+
+    underlying_os_error = (
+        _underlying_os_error(error)
+        if isinstance(error, requests.ConnectionError)
+        else None
+    )
+    underlying_error_class = type(underlying_os_error).__name__ if underlying_os_error else None
+    os_error_code = None
+    if underlying_os_error:
+        os_error_code = getattr(underlying_os_error, 'winerror', None)
+        if type(os_error_code) is not int:
+            os_error_code = getattr(underlying_os_error, 'errno', None)
+        if type(os_error_code) is not int:
+            os_error_code = None
+
+    logger.warning(
+        'Tautulli request failed command=%s exception=%s status=%s underlying_error=%s os_error_code=%s',
+        command,
+        type(error).__name__,
+        status_code,
+        underlying_error_class,
+        os_error_code,
+    )
+
+
 def _request(base_url, api_key, command, **params):
     base_url = normalize_base_url(base_url)
     if not api_key.strip():
@@ -32,14 +86,20 @@ def _request(base_url, api_key, command, **params):
     try:
         response = requests.get(f'{base_url}/api/v2', params={**params, 'apikey': api_key, 'cmd': command}, timeout=20, allow_redirects=False)
         if response.status_code in (401, 403):
-            raise TautulliError('Tautulli authentication failed. Check the API key.')
+            error = TautulliError('Tautulli authentication failed. Check the API key.')
+            _log_request_warning(command, error, response.status_code)
+            raise error
         if 300 <= response.status_code < 400:
-            raise TautulliError('Tautulli redirected the request. Configure its final URL.')
+            error = TautulliError('Tautulli redirected the request. Configure its final URL.')
+            _log_request_warning(command, error, response.status_code)
+            raise error
         response.raise_for_status()
         return response
-    except requests.Timeout:
+    except requests.Timeout as error:
+        _log_request_warning(command, error)
         raise TautulliError('Tautulli request timed out. Check LAN connectivity.') from None
-    except requests.RequestException:
+    except requests.RequestException as error:
+        _log_request_warning(command, error)
         raise TautulliError('Tautulli HTTP request failed. Check the service URL and LAN connectivity.') from None
     except ValueError:
         raise TautulliError('Tautulli request configuration is invalid.') from None

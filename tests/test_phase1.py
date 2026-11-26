@@ -63,12 +63,70 @@ class ClientTests(unittest.TestCase):
         self.assertFalse(get.call_args.kwargs['allow_redirects'])
 
     @patch('tautulli_client.requests.get')
-    def test_safe_failures(self, get):
-        for error in (requests.Timeout('secret-do-not-display'), requests.ConnectionError('secret-do-not-display'), requests.HTTPError('secret-do-not-display')):
-            get.side_effect = error
-            with self.assertRaises(client.TautulliError) as caught:
-                client.get_activity('server', 'runtime-secret')
-            self.assertNotIn('secret', str(caught.exception))
+    def test_transport_failures_are_logged_without_secrets(self, get):
+        connection_error = requests.ConnectionError('connection-secret')
+        connection_error.__cause__ = OSError(111, 'os-error-secret')
+        unavailable = response({}, status=503)
+        unavailable.raise_for_status.side_effect = requests.HTTPError(
+            'http-secret',
+            response=unavailable,
+        )
+        cases = [
+            (requests.Timeout('timeout-secret'), None, 'Timeout', 'status=None'),
+            (connection_error, None, 'ConnectionError', 'os_error_code=111'),
+            (None, unavailable, 'HTTPError', 'status=503'),
+        ]
+        secrets = (
+            'timeout-secret',
+            'connection-secret',
+            'os-error-secret',
+            'http-secret',
+            'api-key-secret',
+            'url-secret',
+        )
+
+        for error, reply, exception_class, expected_field in cases:
+            with self.subTest(exception=exception_class):
+                if reply is not None:
+                    get.side_effect = None
+                    get.return_value = reply
+                else:
+                    get.side_effect = error
+                with self.assertLogs('tautulli_client', level='WARNING') as logs:
+                    with self.assertRaises(client.TautulliError) as caught:
+                        client.tautulli_get(
+                            'http://server/url-secret',
+                            'api-key-secret',
+                            'get_activity',
+                            token='url-secret',
+                        )
+
+                log_output = '\n'.join(logs.output)
+                self.assertIn('command=get_activity', log_output)
+                self.assertIn(f'exception={exception_class}', log_output)
+                self.assertIn(expected_field, log_output)
+                if exception_class == 'ConnectionError':
+                    self.assertIn('underlying_error=OSError', log_output)
+                for secret in secrets:
+                    self.assertNotIn(secret, log_output)
+                    self.assertNotIn(secret, str(caught.exception))
+
+    @patch('tautulli_client.requests.get')
+    def test_auth_and_redirect_responses_are_logged(self, get):
+        for status, expected_error in (
+            (401, 'Tautulli authentication failed. Check the API key.'),
+            (403, 'Tautulli authentication failed. Check the API key.'),
+            (302, 'Tautulli redirected the request. Configure its final URL.'),
+        ):
+            with self.subTest(status=status):
+                get.return_value = response({}, status=status)
+                with self.assertLogs('tautulli_client', level='WARNING') as logs:
+                    with self.assertRaises(client.TautulliError) as caught:
+                        client.get_activity('server', 'runtime-secret')
+                self.assertEqual(str(caught.exception), expected_error)
+                self.assertIn('exception=TautulliError', logs.output[0])
+                self.assertIn(f'status={status}', logs.output[0])
+                self.assertIn('command=get_activity', logs.output[0])
 
     @patch('tautulli_client.requests.get')
     def test_api_auth_and_malformed(self, get):
