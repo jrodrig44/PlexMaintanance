@@ -92,6 +92,7 @@ def get_db_connection() -> sqlite3.Connection:
 def init_db() -> None:
     conn = get_db_connection()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS media_state (
@@ -229,10 +230,10 @@ def normalize_media_state(conn: sqlite3.Connection) -> None:
             key = f"rating:{rating_key}"
         elif file_path and file_path.lower() in file_to_key:
             key = file_to_key[file_path.lower()]
-        elif title and title.lower() in title_to_key:
-            key = title_to_key[title.lower()]
         elif file_path:
             key = f"file:{file_path.lower()}"
+        elif title and title.lower() in title_to_key:
+            key = title_to_key[title.lower()]
         else:
             key = f"title:{title.lower()}"
 
@@ -283,19 +284,49 @@ def resolve_existing_media_key(conn: sqlite3.Connection, record: Dict[str, Any])
     rating_key = str(record.get("rating_key", "") or "").strip()
     file_path = str(record.get("file_path", "") or "").strip()
     title = str(record.get("title", "") or "").strip()
+    desired_key = str(record.get("media_key", "") or "").strip()
+
+    if desired_key:
+        row = conn.execute("SELECT media_key FROM media_state WHERE media_key = ?", (desired_key,)).fetchone()
+        if row:
+            return str(row["media_key"])
 
     if file_path:
-        row = conn.execute("SELECT media_key FROM media_state WHERE lower(file_path) = lower(?) LIMIT 1", (file_path,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT media_key FROM media_state
+            WHERE lower(file_path) = lower(?)
+                AND (rating_key IS NULL OR rating_key = '')
+            LIMIT 1
+            """,
+            (file_path,),
+        ).fetchone()
         if row:
             return str(row["media_key"])
 
     if rating_key and not file_path:
-        row = conn.execute("SELECT media_key FROM media_state WHERE rating_key = ? LIMIT 1", (rating_key,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT media_key FROM media_state
+            WHERE rating_key = ? AND (file_path IS NULL OR file_path = '')
+            LIMIT 1
+            """,
+            (rating_key,),
+        ).fetchone()
         if row:
             return str(row["media_key"])
 
-    if title:
-        row = conn.execute("SELECT media_key FROM media_state WHERE lower(title) = lower(?) LIMIT 1", (title,)).fetchone()
+    if title and not file_path and not rating_key:
+        row = conn.execute(
+            """
+            SELECT media_key FROM media_state
+            WHERE lower(title) = lower(?)
+                AND (file_path IS NULL OR file_path = '')
+                AND (rating_key IS NULL OR rating_key = '')
+            LIMIT 1
+            """,
+            (title,),
+        ).fetchone()
         if row:
             return str(row["media_key"])
 
@@ -389,6 +420,7 @@ def upsert_media_state(results_df: pd.DataFrame) -> None:
     now = datetime.now(timezone.utc).isoformat()
 
     try:
+        conn.execute("BEGIN IMMEDIATE")
         for record in dataframe_to_records(results_df):
             desired_key = str(record["media_key"])
             existing_key = resolve_existing_media_key(conn, record)

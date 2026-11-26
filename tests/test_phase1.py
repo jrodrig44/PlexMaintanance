@@ -204,6 +204,82 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(len(loaded), 1)
         self.assertEqual(len(queue), 1)
 
+    def test_upsert_updates_exact_pathless_rating_key(self):
+        conn = app.get_db_connection()
+        conn.executemany(
+            """
+            INSERT INTO media_state (
+                media_key, rating_key, title, file_path, total_plays, server_status, status, first_seen_at, last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ('rating:1|file:z:\\movie.mkv', '1', 'Movie', 'Z:\\Movie.mkv', 3, 'Played', 'Keep', 'first', 'first'),
+                ('rating:1', '1', 'Movie', '', 0, 'Unwatched', 'Queued for delete', 'second', 'second'),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        df = pd.DataFrame([dict(RatingKey='1', Title='Movie', FilePath='', TotalPlays=5, ServerStatus='Played', Status='Keep')])
+        app.upsert_media_state(df)
+
+        conn = app.get_db_connection()
+        rows = conn.execute(
+            "SELECT media_key, file_path, total_plays, status FROM media_state ORDER BY media_key"
+        ).fetchall()
+        conn.close()
+        self.assertEqual(len(rows), 2)
+        by_key = {row['media_key']: row for row in rows}
+        self.assertEqual(by_key['rating:1|file:z:\\movie.mkv']['file_path'], 'Z:\\Movie.mkv')
+        self.assertEqual(by_key['rating:1|file:z:\\movie.mkv']['total_plays'], 3)
+        self.assertEqual(by_key['rating:1']['file_path'], '')
+        self.assertEqual(by_key['rating:1']['total_plays'], 5)
+        self.assertEqual(by_key['rating:1']['status'], 'Keep')
+
+    def test_upsert_upgrades_unrated_row_by_matching_path(self):
+        conn = app.get_db_connection()
+        conn.execute(
+            """
+            INSERT INTO media_state (
+                media_key, rating_key, title, file_path, total_plays, server_status, status, first_seen_at, last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ('file:z:\\movie.mkv', '', 'Movie', 'Z:\\Movie.mkv', 0, 'Unwatched', 'Keep', 'first', 'first'),
+        )
+        conn.commit()
+        conn.close()
+
+        df = pd.DataFrame([dict(RatingKey='1', Title='Movie', FilePath='Z:\\Movie.mkv', TotalPlays=2, ServerStatus='Played', Status='Keep')])
+        app.upsert_media_state(df)
+
+        conn = app.get_db_connection()
+        rows = conn.execute("SELECT media_key, rating_key, file_path FROM media_state").fetchall()
+        conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['media_key'], 'rating:1|file:z:\\movie.mkv')
+        self.assertEqual(rows[0]['rating_key'], '1')
+        self.assertEqual(rows[0]['file_path'], 'Z:\\Movie.mkv')
+
+    def test_repeat_scans_preserve_same_title_at_distinct_paths(self):
+        df = pd.DataFrame([
+            dict(RatingKey='1', Title='Shared title', FilePath='Z:\\First.mkv', TotalPlays=0, ServerStatus='Unwatched', Status='Keep'),
+            dict(RatingKey='1', Title='Shared title', FilePath='Z:\\Second.mkv', TotalPlays=0, ServerStatus='Unwatched', Status='Keep'),
+            dict(RatingKey='', Title='Shared title', FilePath='Z:\\Disk-only.mkv', TotalPlays=0, ServerStatus='Unwatched', Status='Not in Plex'),
+        ])
+        app.upsert_media_state(df)
+        app.upsert_media_state(df)
+
+        conn = app.get_db_connection()
+        rows = conn.execute("SELECT media_key, file_path FROM media_state").fetchall()
+        conn.close()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(
+            {row['file_path'] for row in rows},
+            {'Z:\\First.mkv', 'Z:\\Second.mkv', 'Z:\\Disk-only.mkv'},
+        )
+
     @patch('app.st.progress', return_value=Mock())
     @patch('app.st.empty', return_value=Mock())
     @patch('app.tautulli_get')
